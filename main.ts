@@ -117,6 +117,6 @@ test('Happy path to enroll in RV Platinum Complete coverage with validation chec
     await expect(submitButton).toBeVisible();
     await expect(termsCheckbox).toBeVisible();
 
-    console.log('✅ All payment form fields verified.');
+    console.log('All payment form fields verified.');
   });
 });
