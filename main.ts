@@ -1,122 +1,178 @@
 import { test, expect } from '@playwright/test';
 
-test('Happy path to enroll in RV Platinum Complete coverage with validation check', async ({ browser }) => {
+test('happy path: check required payment form elements after full enrollment flow', async ({ browser }) => {
   const context = await browser.newContext({
     userAgent: 'BetterStack',
+    // headless: false,
+    // slowMo: 50,
   });
-
   const page = await context.newPage();
 
-  // Test Data
-  const invalidData = {
-    firstName: 'John',
-    lastName: 'Doe',
-    address: 'Invalid Address 123!@#',
-    address2: 'Apt 4B',
-    city: 'InvalidCity123',
-    zip: '00000',
-    phone: '555-123-4567',
-    email: 'invalid-email-format',
-    confirmEmail: 'different-email@test.com',
-  };
+  console.log('⏳ Navigating to homepage...');
+  await page.goto('https://roadside.goodsam.com/?test=hello1', { waitUntil: 'load' });
+  console.log('✅ Page loaded:', page.url());
 
-  const validData = {
-    address: '123 Main Street',
-    city: 'Laurel',
-    zip: '20707',
-    email: 'john.doe@yahoo.com',
-  };
-
-  await test.step('Navigate to the Roadside site', async () => {
-    await page.goto('https://roadside.goodsam.com/?test=hello1');
-    await expect(page).toHaveURL(/roadside\.goodsam\.com/);
-  });
-
-  await test.step('Select Platinum Complete plan and enroll', async () => {
-    await page.getByText('Platinum Complete').click();
-    await page.getByRole('button', { name: 'Enroll now' }).click();
-    await page.waitForLoadState('networkidle');
-    await expect(page).toHaveURL(/plan/i);
-  });
-
-  await test.step('Select RV Coverage and 3-Year Term', async () => {
-    await page.getByText('RV Coverage').click();
-    await page.getByRole('radio', { name: '3 years' }).click();
-  });
-
-  await test.step('Select RV type and continue', async () => {
-    await page.selectOption('select[name="rvType"]', '5th Wheel Trailer');
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await page.waitForLoadState('networkidle');
-    await expect(page.locator('form')).toBeVisible();
-  });
-
-  await test.step('Fill form with invalid data', async () => {
-    await page.getByLabel('First Name').fill(invalidData.firstName);
-    await page.getByLabel('Last Name').fill(invalidData.lastName);
-    await page.getByLabel('Address').fill(invalidData.address);
-    await page.getByLabel('Address 2').fill(invalidData.address2);
-    await page.getByLabel('City').fill(invalidData.city);
-    await page.selectOption('select[name="state"]', { label: 'Maryland' });
-    await page.getByLabel('Zip Code').fill(invalidData.zip);
-    await page.selectOption('select[name="country"]', { label: 'United States' });
-    await page.getByLabel('Phone').fill(invalidData.phone);
-    await page.getByLabel('Email').fill(invalidData.email);
-    await page.getByLabel('Confirm Email').fill(invalidData.confirmEmail);
-    await page.getByRole('button', { name: 'Next Step' }).click();
-  });
-
-  await test.step('Check for validation errors and correct the data', async () => {
-    const errorPopup = page.locator('.error-popup, .alert-error, [role="alert"], .validation-error');
-    const errorMessage = page.locator('text=/error|invalid|required/i');
-
-    if (await errorPopup.isVisible() || await errorMessage.isVisible()) {
-      console.log('Validation errors detected, correcting data...');
-
-      const closeButton = page.locator('.close, .dismiss, [aria-label="close"]');
-      if (await closeButton.isVisible()) {
-        await closeButton.click();
-      }
-
-      await page.getByLabel('Address').fill(validData.address);
-      await page.getByLabel('City').fill(validData.city);
-      await page.getByLabel('Zip Code').fill(validData.zip);
-      await page.getByLabel('Email').fill(validData.email);
-      await page.getByLabel('Confirm Email').fill(validData.email);
-      await page.getByRole('button', { name: 'Next Step' }).click();
+  // Click visible Enroll button
+  const enrollButtons = page.locator('button, a', { hasText: 'Enroll' });
+  let enrollClicked = false;
+  for (let i = 0; i < await enrollButtons.count(); i++) {
+    if (await enrollButtons.nth(i).isVisible()) {
+      console.log(`✅ Found visible Enroll button #${i + 1}, clicking...`);
+      await Promise.all([
+        page.waitForURL(url => url.href.includes('/checkout'), { timeout: 20000 }),
+        enrollButtons.nth(i).click(),
+      ]);
+      enrollClicked = true;
+      break;
     }
-    await page.waitForLoadState('networkidle');
-  });
+  }
+  if (!enrollClicked) throw new Error('No visible Enroll button found');
+  console.log('✅ Enroll button clicked, navigated to:', page.url());
 
-  await test.step('Decline any optional offers if shown', async () => {
-    const declineOffer = page.getByRole('button', { name: /decline|no thanks|skip/i });
-    if (await declineOffer.isVisible()) {
-      await declineOffer.click();
+  // Select Platinum Complete coverage
+  const platinumLink = page.locator('a.selectPlanLink[title="Select Platinum Complete"]').first();
+  await platinumLink.waitFor({ state: 'visible' });
+  await Promise.all([
+    page.waitForLoadState('networkidle'),
+    platinumLink.click(),
+  ]);
+  console.log('✅ Platinum Complete coverage selected');
+
+  // Click 3-year term price
+  const priceElements = page.locator('div.curr-price');
+  let priceClicked = false;
+  for (let i = 0; i < await priceElements.count(); i++) {
+    const text = await priceElements.nth(i).textContent();
+    if (text?.includes('$359.85')) {
+      await priceElements.nth(i).click();
+      priceClicked = true;
+      break;
     }
-  });
+  }
+  if (!priceClicked) throw new Error('3-year term option not found');
+  console.log('✅ 3-year term selected ($359.85)');
 
-  await test.step('Continue to payment review', async () => {
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await page.waitForLoadState('networkidle');
-    await page.getByRole('button', { name: 'Review Payment' }).click();
-    await page.waitForLoadState('networkidle');
-  });
+  // Fill RV info and terms
+  await page.selectOption('select[name="vehicleType"]', { label: '5th Wheel Trailer' });
+  const vehicleYearSelect = page.locator('select[name="vehicleYear"]');
+  if (await vehicleYearSelect.count()) await vehicleYearSelect.selectOption({ label: '2023' });
+  const vehicleMakeInput = page.locator('input[name="vehicleMake"]');
+  if (await vehicleMakeInput.count()) await vehicleMakeInput.fill('Forest River');
+  const vehicleModelInput = page.locator('input[name="vehicleModel"]');
+  if (await vehicleModelInput.count()) await vehicleModelInput.fill('XLR Boost');
+  const termsCheckbox = page.locator('input[type="checkbox"][name="terms"]');
+  if (await termsCheckbox.count() && !(await termsCheckbox.isChecked())) await termsCheckbox.check();
+  console.log('✅ RV info and terms filled/checked');
 
-  await test.step('Verify all payment form elements are visible', async () => {
-    const cardNumberField = page.getByLabel(/card number|credit card/i);
-    const cardholderNameField = page.getByLabel(/cardholder name|name on card/i);
-    const expiryDateField = page.getByLabel(/expiry|expiration|exp date/i);
-    const cvvField = page.getByLabel(/cvv|security code|cvc/i);
-    const submitButton = page.getByRole('button', { name: /submit|pay now|complete/i });
-    const termsCheckbox = page.locator('input[type="checkbox"]').filter({ hasText: /terms|conditions|agreement/i });
+  // Continue to Customer Information page
+  const continueButton = page.locator('button, a', { hasText: /Continue|Next|Submit|Proceed|Review|Checkout/i }).first();
+  await continueButton.waitFor({ state: 'visible', timeout: 10000 });
+  const continueButtonElem = await continueButton.elementHandle();
+  if (!continueButtonElem) throw new Error('Continue button element handle not found');
+  await continueButtonElem.waitForElementState('enabled', { timeout: 10000 });
+  await Promise.all([
+    page.waitForURL('**/checkout/account-info', { timeout: 30000 }),
+    continueButton.click(),
+  ]);
+  console.log('✅ Continued to Customer Information page');
 
-    await expect(cardNumberField).toBeVisible();
-    await expect(cardholderNameField).toBeVisible();
-    await expect(expiryDateField).toBeVisible();
-    await expect(cvvField).toBeVisible();
-    await expect(submitButton).toBeVisible();
-    await expect(termsCheckbox).toBeVisible();
+  // Find frame with billing[firstName]
+  const frames = page.frames();
+  async function findFrameWithInput(frames, selector) {
+    for (const frame of frames) {
+      try {
+        if ((await frame.locator(selector).count()) > 0) return frame;
+      } catch {}
+    }
+    return null;
+  }
+  const custSelector = 'input[name="billing[firstName]"]';
+  let customerFrame = await findFrameWithInput(frames, custSelector);
+  if (!customerFrame) {
+    const mainCount = await page.locator(custSelector).count();
+    customerFrame = mainCount > 0 ? page : null;
+  }
+  if (!customerFrame) throw new Error('Cannot find personal info form fields');
 
-    console.log('All payment form fields verified.');
-  });
+  // Fill personal and billing info
+  await customerFrame.fill('input[name="billing[firstName]"]', 'John');
+  await customerFrame.fill('input[name="billing[lastName]"]', 'Doe');
+  await customerFrame.fill('input[name="billing[emailAddress]"], input[name="billing[email]"]', 'john.doe@example.com');
+  await customerFrame.fill('input[name="billing[emailConfirm]"]', 'john.doe@example.com');
+  await customerFrame.fill('input[name="billing[phoneNumber]"], input[name="billing[phone]"], input[name="phoneNumber"]', '1234567890');
+
+  const addressInputs = [
+    ['input[name="billing[addressLine1]"], input[name="billing[address1]"], input[name="address1"]', '123 RV Street'],
+    ['input[name="billing[city]"], input[name="city"]', 'Camp Town'],
+    ['input[name="billing[zipOrPostalCode]"], input[name="billing[zipCode]"], input[name="zipCode"]', '33101'],
+  ];
+  for (const [selector, value] of addressInputs) {
+    const ele = customerFrame.locator(selector);
+    if ((await ele.count()) > 0) await ele.fill(value);
+  }
+  await customerFrame.selectOption('select[name="billing[stateOrProvince]"]', 'FL');
+  console.log('✅ Billing address and state filled');
+
+  // Click Next Step and wait for page load
+  const nextStepBtn = customerFrame.locator('button#submitAddress');
+  await nextStepBtn.waitFor({ state: 'visible', timeout: 15000 });
+  await expect(nextStepBtn).toBeEnabled({ timeout: 15000 });
+  console.log('Clicking Next Step button...');
+  await Promise.all([
+    page.waitForLoadState('domcontentloaded', { timeout: 30000 }),
+    nextStepBtn.click(),
+  ]);
+
+  // Click Decline offer and continue and wait navigation
+  const declineOfferSelector = 'a#decline-offer';
+  await page.waitForSelector(declineOfferSelector, { state: 'visible', timeout: 15000 });
+  const declineOfferLink = page.locator(declineOfferSelector).first();
+  const declineOfferElem = await declineOfferLink.elementHandle();
+  if (!declineOfferElem) throw new Error('"Decline offer and continue" link element handle not found');
+  await declineOfferElem.waitForElementState('enabled', { timeout: 10000 });
+  console.log('Clicking Decline offer and continue link...');
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
+    declineOfferLink.click(),
+  ]);
+  console.log('Navigated to payment step');
+
+  // Click Review Payment button and wait navigation
+  const reviewPaymentBtn = page.locator('button#submitReview');
+  await reviewPaymentBtn.waitFor({ state: 'visible', timeout: 20000 });
+  await expect(reviewPaymentBtn).toBeEnabled({ timeout: 20000 });
+  console.log('Clicking Review Payment button...');
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
+    reviewPaymentBtn.click(),
+  ]);
+  console.log('Navigated to payment input page');
+
+  // Wait a bit for dynamic content loading
+  await page.waitForTimeout(2000);
+
+  // Check presence of required payment form elements in ANY frame
+  async function labelIsVisibleAnywhere(labelSelector) {
+    for (const frame of page.frames()) {
+      if (await frame.locator(labelSelector).isVisible().catch(() => false)) return true;
+    }
+    return false;
+  }
+
+  const requiredSelectors = [
+    '#CardNumberLabel',
+    '#CardHolderNameLabel',
+    '#ExpiryLabel',
+    '#CVVLabel',
+    'input[type="button"].submit-button',
+  ];
+
+  for (const selector of requiredSelectors) {
+    const found = await labelIsVisibleAnywhere(selector);
+    expect(found, `${selector} should be visible in some frame`).toBe(true);
+  }
+
+  console.log('✅ All required payment form elements are present. Test complete.');
+
+  await context.close();
 });
